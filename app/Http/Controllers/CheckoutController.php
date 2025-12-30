@@ -14,11 +14,13 @@ use Illuminate\Validation\ValidationException;
 
 class CheckoutController extends Controller
 {
+    // Process checkout and create order
     public function store(Request $request): RedirectResponse
     {
         $userId = $request->user()->id;
         $lowStockThreshold = (int) env('LOW_STOCK_THRESHOLD', 5);
 
+        // Use transaction to ensure data consistency
         DB::transaction(function () use ($userId, $lowStockThreshold) {
             $cart = Cart::query()
                 ->where('user_id', $userId)
@@ -31,6 +33,7 @@ class CheckoutController extends Controller
                 ]);
             }
 
+            // Create order
             $order = Order::query()->create([
                 'user_id' => $userId,
                 'total_cents' => 0,
@@ -40,25 +43,29 @@ class CheckoutController extends Controller
 
             foreach ($cart->items as $item) {
                 /** @var Product $product */
+                // Lock product row to prevent race conditions
                 $product = Product::query()
                     ->whereKey($item->product_id)
                     ->lockForUpdate()
                     ->firstOrFail();
 
+                // Check stock availability
                 if ($item->quantity > $product->stock_quantity) {
                     throw ValidationException::withMessages([
                         'cart' => "Not enough stock for {$product->name}. Only {$product->stock_quantity} left.",
                     ]);
                 }
 
+                // Update stock
                 $newStock = $product->stock_quantity - $item->quantity;
-
                 $product->stock_quantity = $newStock;
                 $product->save();
 
+                // Calculate totals
                 $lineTotal = $product->price_cents * $item->quantity;
                 $totalCents += $lineTotal;
 
+                // Create order item
                 OrderItem::query()->create([
                     'order_id' => $order->id,
                     'product_id' => $product->id,
@@ -66,6 +73,7 @@ class CheckoutController extends Controller
                     'quantity' => $item->quantity,
                 ]);
 
+                // Queue low stock notification if needed
                 if ($newStock <= $lowStockThreshold) {
                     SendLowStockNotificationJob::dispatch($product->id)->afterCommit();
                 }
@@ -74,6 +82,7 @@ class CheckoutController extends Controller
             $order->total_cents = $totalCents;
             $order->save();
 
+            // Clear cart
             $cart->items()->delete();
         });
 

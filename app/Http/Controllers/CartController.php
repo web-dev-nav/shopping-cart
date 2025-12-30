@@ -13,8 +13,10 @@ use Inertia\Response;
 
 class CartController extends Controller
 {
+    // Display cart with items and totals
     public function show(Request $request): Response
     {
+        // Get or create cart for current user
         $cart = Cart::firstOrCreate([
             'user_id' => $request->user()->id,
         ]);
@@ -40,6 +42,7 @@ class CartController extends Controller
         ]);
     }
 
+    // Add product to cart or increase quantity
     public function store(Request $request): RedirectResponse
     {
         $data = $request->validate([
@@ -54,13 +57,16 @@ class CartController extends Controller
         /** @var Product $product */
         $product = Product::query()->findOrFail($data['product_id']);
 
+        // Get existing cart item or create new one
         $item = CartItem::query()->firstOrNew([
             'cart_id' => $cart->id,
             'product_id' => $product->id,
         ]);
 
+        // Calculate new quantity
         $newQuantity = ($item->exists ? $item->quantity : 0) + (int) $data['quantity'];
 
+        // Check stock availability
         if ($newQuantity > $product->stock_quantity) {
             throw ValidationException::withMessages([
                 'quantity' => "Only {$product->stock_quantity} left in stock.",
@@ -73,8 +79,10 @@ class CartController extends Controller
         return back(303);
     }
 
+    // Update cart item quantity
     public function update(Request $request, CartItem $cartItem): RedirectResponse
     {
+        // Verify cart belongs to current user
         if ($cartItem->cart->user_id !== $request->user()->id) {
             abort(403);
         }
@@ -85,6 +93,7 @@ class CartController extends Controller
 
         $cartItem->loadMissing('product');
 
+        // Check stock availability
         if ((int) $data['quantity'] > $cartItem->product->stock_quantity) {
             throw ValidationException::withMessages([
                 'quantity' => "Only {$cartItem->product->stock_quantity} left in stock.",
@@ -97,8 +106,10 @@ class CartController extends Controller
         return back(303);
     }
 
+    // Remove item from cart
     public function destroy(Request $request, CartItem $cartItem): RedirectResponse
     {
+        // Verify cart belongs to current user
         if ($cartItem->cart->user_id !== $request->user()->id) {
             abort(403);
         }
